@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 DS320 Final Project – PA Credit Approval with Multi-Source Fusion
 Data source:
@@ -36,7 +35,6 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.impute import SimpleImputer
 from sklearn.metrics import roc_auc_score, average_precision_score
 
-# ============ 路径配置（按你机器的路径） ============
 BASE_DIR = "/Users/wangshuyi/Desktop"
 DATA_DIR = f"{BASE_DIR}/data_raw"
 REPORT_DIR = f"{BASE_DIR}/reports"
@@ -314,7 +312,6 @@ def main():
             )
         all_results.extend(res)
 
-    # 保存结果表
     results_df = pd.DataFrame(all_results)
     out_path = Path(REPORT_DIR) / "main_results.csv"
     results_df.to_csv(out_path, index=False)
