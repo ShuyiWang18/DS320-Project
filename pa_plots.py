@@ -1,6 +1,4 @@
 # pa_plots.py
-# 使用 pa_project.py 里的函数，生成 ROC/PR/特征重要性/分组批准率 图
-
 import os
 
 import numpy as np
@@ -101,7 +99,6 @@ def train_lr_rf_for_scheme(scheme_name, full, train, valid, test):
 
 
 def plot_roc_pr_hmda(probs, y_test):
-    """画 HMDA scheme 下 LR & RF 的 ROC/PR 曲线"""
     lr_proba = probs["LR"]["proba"]
     rf_proba = probs["RF"]["proba"]
 
@@ -142,7 +139,6 @@ def plot_roc_pr_hmda(probs, y_test):
 
 
 def plot_rf_importance(probs, scheme_name="HMDA+ACS+PMMS", top_k=20):
-    """画 Random Forest 的特征重要性（取前 top_k 个）"""
     rf_info = probs["RF"]
     model = rf_info["model"]
     num_cols = rf_info["num_cols"]
@@ -185,7 +181,6 @@ def plot_rf_importance(probs, scheme_name="HMDA+ACS+PMMS", top_k=20):
 
 
 def plot_group_approval(full):
-    """按 race / sex 画批准率条形图（基于 y 标签）"""
     # race
     if "race" in full.columns:
         tmp = full.copy()
