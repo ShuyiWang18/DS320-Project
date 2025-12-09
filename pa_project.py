@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 DS320 Final Project – PA Credit Approval with Multi-Source Fusion
 Data source:
@@ -34,7 +35,10 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.impute import SimpleImputer
 from sklearn.metrics import roc_auc_score, average_precision_score
+from xgboost import XGBClassifier
 
+
+# ============ 路径配置（按你机器的路径） ============
 BASE_DIR = "/Users/wangshuyi/Desktop"
 DATA_DIR = f"{BASE_DIR}/data_raw"
 REPORT_DIR = f"{BASE_DIR}/reports"
@@ -142,7 +146,14 @@ def load_pmms(path: str) -> pd.DataFrame:
         if col in pm.columns:
             pm[col] = pd.to_numeric(pm[col], errors="coerce")
     pm = pm[["pmms_date"] + [c for c in ["pmms30", "pmms15"] if c in pm.columns]]
-    pm = pm.dropna(subset=["pmms_date"]).sort_values("pmms_date")
+    pm = pm[["pmms_date"] + [c for c in ["pmms30", "pmms15"] if c in pm.columns]]
+    pm = pm.dropna(subset=["pmms_date"])
+
+
+    pm = pm[(pm["pmms_date"] >= "2024-01-01") & (pm["pmms_date"] <= "2024-12-31")]
+
+    pm = pm.sort_values("pmms_date")
+
     print(
         f"[PMMS] rows: {len(pm):,} ; date span: "
         f"{pm['pmms_date'].min().date()} → {pm['pmms_date'].max().date()}"
@@ -261,7 +272,20 @@ def run_scheme(name: str, cols: dict,
         "RF": RandomForestClassifier(
             n_estimators=300, random_state=42, n_jobs=-1
         ),
+        "XGB": XGBClassifier(
+            n_estimators=300,
+            max_depth=4,
+            learning_rate=0.1,
+            subsample=0.8,
+            colsample_bytree=0.8,
+            objective="binary:logistic",
+            eval_metric="logloss",
+            tree_method="hist",   # CPU 上比较快
+            n_jobs=-1,
+            random_state=42,
+        ),
     }
+
 
     results = []
     for model_name, model in models.items():
@@ -312,6 +336,7 @@ def main():
             )
         all_results.extend(res)
 
+    # 保存结果表
     results_df = pd.DataFrame(all_results)
     out_path = Path(REPORT_DIR) / "main_results.csv"
     results_df.to_csv(out_path, index=False)
