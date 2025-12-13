@@ -351,6 +351,17 @@ def run_scheme(name: str, cols: dict, train: pd.DataFrame, valid: pd.DataFrame, 
 
         except Exception as e:
             print(f"[WARN] income-band metrics failed for {name}-{model_name}: {e}")
+   
+        save_feature_importance(pipe, scheme=name, model_name=model_name, top_k=30)
+        save_group_fairness_tables(
+            test_df=test,
+            y_true=y_test,
+            y_prob=proba_test,
+            scheme=name,
+            model_name=model_name,
+            thr=THR,
+)
+
 
     # ---- Save per-band table for this scheme ----
     if band_tables:
@@ -514,6 +525,130 @@ def income_band_analysis(model, X_test, y_test, income_series, thresholds, title
     plt.show()
 
     return summary
+# =========================
+# NEW: Feature importance + Group fairness (race/sex)
+# =========================
+
+def _safe_feature_names(preprocessor) -> np.ndarray:
+    """
+    Try best to get transformed feature names from ColumnTransformer.
+    Works for sklearn >= 1.0 in most cases.
+    """
+    try:
+        return preprocessor.get_feature_names_out()
+    except Exception:
+        # Fallback: use raw column names (won't expand one-hot)
+        # Still better than crashing.
+        names = []
+        try:
+            # ColumnTransformer stores transformers_ after fit
+            for name, trans, cols in preprocessor.transformers_:
+                if name == "remainder":
+                    continue
+                if isinstance(cols, (list, tuple, np.ndarray)):
+                    for c in cols:
+                        names.append(f"{name}__{c}")
+                else:
+                    names.append(f"{name}__{cols}")
+            return np.array(names, dtype=object)
+        except Exception:
+            return np.array([], dtype=object)
+
+
+def save_feature_importance(pipe: Pipeline, scheme: str, model_name: str, top_k: int = 30):
+    """
+    Save feature importance (tree) or abs(coef) (LR) after the pipeline is fitted.
+    Output: reports/feature_importance_{scheme}_{model}.csv
+    """
+    pre = pipe.named_steps["pre"]
+    clf = pipe.named_steps["clf"]
+
+    feat_names = _safe_feature_names(pre)
+    if feat_names.size == 0:
+        print(f"[WARN] feature names not available for {scheme}-{model_name}")
+        return
+
+    importances = None
+    method = None
+
+    # Tree models
+    if hasattr(clf, "feature_importances_"):
+        importances = getattr(clf, "feature_importances_", None)
+        method = "feature_importances_"
+    # Linear model
+    elif hasattr(clf, "coef_"):
+        coef = getattr(clf, "coef_", None)
+        if coef is not None:
+            importances = np.abs(coef).ravel()
+            method = "abs(coef_)"
+
+    if importances is None:
+        print(f"[WARN] No importance attribute for {scheme}-{model_name}")
+        return
+
+    # Align length
+    m = min(len(feat_names), len(importances))
+    df_imp = pd.DataFrame({
+        "feature": feat_names[:m].astype(str),
+        "importance": np.asarray(importances[:m], dtype=float),
+        "method": method,
+        "scheme": scheme,
+        "model": model_name,
+    }).sort_values("importance", ascending=False)
+
+    out_path = Path(REPORT_DIR) / f"feature_importance_{scheme}_{model_name}.csv"
+    df_imp.to_csv(out_path, index=False)
+
+    print(f"Saved feature importance to: {out_path}")
+    print(df_imp.head(top_k)[["feature", "importance"]].to_string(index=False))
+
+
+def _group_rate_table(y_true, y_prob, group_series: pd.Series, thr: float = 0.5) -> pd.DataFrame:
+    """
+    Compute actual approval rate + predicted positive rate + mean predicted prob by group.
+    """
+    g = group_series.astype(str).fillna("Missing")
+    y_true = np.asarray(y_true)
+    y_prob = np.asarray(y_prob)
+    y_pred = (y_prob >= thr).astype(int)
+
+    df = pd.DataFrame({"group": g, "y": y_true, "y_prob": y_prob, "y_pred": y_pred})
+    out = (
+        df.groupby("group", observed=True)
+          .agg(
+              n=("y", "size"),
+              approval_rate=("y", "mean"),
+              pred_pos_rate=("y_pred", "mean"),
+              mean_pred_prob=("y_prob", "mean"),
+          )
+          .reset_index()
+          .sort_values("n", ascending=False)
+    )
+    return out
+
+
+def save_group_fairness_tables(test_df: pd.DataFrame, y_true, y_prob,
+                               scheme: str, model_name: str, thr: float = 0.5):
+    """
+    Save group-based fairness tables for race & sex.
+    Outputs:
+      reports/group_rates_race_{scheme}_{model}.csv
+      reports/group_rates_sex_{scheme}_{model}.csv
+    """
+    for col in ["race", "sex"]:
+        if col not in test_df.columns:
+            print(f"[WARN] {col} not found in test df; skip fairness table.")
+            continue
+
+        tab = _group_rate_table(y_true, y_prob, test_df[col], thr=thr)
+        tab["scheme"] = scheme
+        tab["model"] = model_name
+        tab["group_col"] = col
+
+        out_path = Path(REPORT_DIR) / f"group_rates_{col}_{scheme}_{model_name}.csv"
+        tab.to_csv(out_path, index=False)
+        print(f"Saved group fairness table to: {out_path}")
+
 def plot_income_bins(full: pd.DataFrame):
     """
     Cross-validation / sensitivity: how does approval rate change
